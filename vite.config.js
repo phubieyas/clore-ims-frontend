@@ -1,5 +1,7 @@
 import { defineConfig } from 'vite'
+import react from '@vitejs/plugin-react'
 
 export default defineConfig({
-  base: '/clore-ims-frontend/'
+  base: '/clore-ims-frontend/',
+  plugins: [react()]
 })
