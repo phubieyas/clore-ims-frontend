@@ -48,5 +48,3 @@ coverage/
 *.key.json
 serviceAccountKey.json
 service-account.json
-
-package-lock.json
