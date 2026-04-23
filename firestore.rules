@@ -1,0 +1,104 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Basic helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'Admin';
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Users may read their own profile; admins can read any
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+
+      // Admins may create and delete user docs. Users may update their own profile
+      // but must not write the `role` field themselves.
+      allow create: if isAdmin();
+      allow update: if isAdmin() || (
+        request.auth.uid == userId &&
+        !(request.resource.data.keys().hasAny(['role']))
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Products: readable by signed-in users, writable by Admins with basic validation
+    match /products/{productId} {
+      allow read: if isSignedIn();
+      // Separate create vs update validation: require name and sellingPrice on create,
+      // but allow partial updates (e.g. only `stock`) on update as long as provided fields are valid.
+      allow create: if isAdmin() &&
+        request.resource.data.name is string && request.resource.data.name.size() > 0 &&
+        (request.resource.data.stock is int || request.resource.data.stock is number) &&
+        (request.resource.data.sellingPrice is number || request.resource.data.sellingPrice is int);
+
+      allow update: if isAdmin() &&
+        // if client provided `name`, it must be a non-empty string
+        (!request.resource.data.keys().hasAny(['name']) || (request.resource.data.name is string && request.resource.data.name.size() > 0)) &&
+        // if client provided `stock`, it must be numeric
+        (!request.resource.data.keys().hasAny(['stock']) || (request.resource.data.stock is int || request.resource.data.stock is number)) &&
+        // if client provided `sellingPrice`, it must be numeric
+        (!request.resource.data.keys().hasAny(['sellingPrice']) || (request.resource.data.sellingPrice is number || request.resource.data.sellingPrice is int));
+      allow delete: if isAdmin();
+    }
+
+    // Purchases: readable by signed-in users, writable by Admins with validation
+    match /purchases/{purchaseId} {
+      allow read: if isSignedIn();
+      // Only Admins may create/update/delete purchases. Require canonical fields.
+      allow create, update, delete: if isAdmin() &&
+        (request.resource.data.productid is string) &&
+        ((request.resource.data.quantity is int) || (request.resource.data.quantity is number)) &&
+        (request.resource.data.quantity > 0);
+    }
+
+    // Stocks (stock movements): readable by signed-in users; only Admins may create
+    // Validate minimal fields: productid, quantity (>0), transtype, transdate (timestamp)
+    match /stocks/{stockId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() &&
+        (request.resource.data.productid is string) &&
+        ((request.resource.data.quantity is int) || (request.resource.data.quantity is number)) &&
+        (request.resource.data.quantity > 0) &&
+        request.resource.data.transtype in ['in', 'out'] &&
+        (request.resource.data.transdate is timestamp);
+      allow update, delete: if isAdmin();
+    }
+
+    // Orders, Documents and legacy stockMovements: same policy
+    match /orders/{orderId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /documents/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /stockMovements/{docId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // Logs and app state are admin-only
+    match /logs/{logId} {
+      allow read, write: if isAdmin();
+    }
+
+    match /clore/state {
+      allow read, write: if isAdmin();
+    }
+
+    // Default deny for everything else
+    match /{document=**} {
+      allow read: if false;
+      allow write: if false;
+    }
+  }
+}
